@@ -20,4 +20,5 @@ python-docx==1.1.0
 pgvector==0.2.4
 slowapi==0.1.9
 httpx==0.25.2
+aiofiles==23.2.1
 
