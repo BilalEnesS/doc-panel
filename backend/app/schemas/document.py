@@ -35,3 +35,19 @@ class DocumentUploadResponse(BaseModel):
     document: DocumentResponse
 
 
+class DocumentUpdateRequest(BaseModel):
+    """Document update request schema"""
+
+    title: Optional[str] = None
+    category: Optional[str] = None
+
+
+class DocumentListResponse(BaseModel):
+    """Document list response with pagination"""
+
+    documents: list[DocumentResponse]
+    total: int
+    limit: int
+    offset: int
+
+

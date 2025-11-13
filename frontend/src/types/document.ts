@@ -27,4 +27,27 @@ export interface DocumentUploadResponse {
   document: Document;
 }
 
+export interface DocumentUpdateRequest {
+  title?: string;
+  category?: string;
+}
+
+export interface DocumentListResponse {
+  documents: Document[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface DocumentListParams {
+  limit?: number;
+  offset?: number;
+  status?: DocumentStatus;
+  file_type?: FileType;
+  category?: string;
+  search?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
 
