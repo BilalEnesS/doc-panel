@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/Layout';
 import { useAuthStore } from '../store/authStore';
 import { documentService } from '../services/documentService';
-import { Document } from '../types/document';
+import { Document, DocumentListParams } from '../types/document';
 
 const stats = [
   { label: 'Aktif Belgeler', value: '24', change: '+12%', changeType: 'positive' },
@@ -105,21 +105,107 @@ function formatFileSize(bytes: number): string {
 
 export default function Home() {
   const user = useAuthStore((state) => state.user);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  
+  const [filters, setFilters] = useState<DocumentListParams>({
+    limit: 20,
+    offset: 0,
+    sort_by: 'created_at',
+    sort_order: 'desc',
+  });
 
-  // Fetch documents with polling for processing status
-  const { data: documents = [], refetch } = useQuery({
-    queryKey: ['documents'],
-    queryFn: () => documentService.listDocuments(20, 0),
-    refetchInterval: (query) => {
-      // Poll every 3 seconds if there are processing documents
-      const hasProcessing = query.state.data?.some((doc) => doc.status === 'processing');
-      return hasProcessing ? 3000 : false;
+  // Clean filters: remove empty strings and convert to undefined
+  const cleanFilters: DocumentListParams = useMemo(() => {
+    const cleaned: DocumentListParams = {
+      limit: filters.limit,
+      offset: filters.offset,
+      sort_by: filters.sort_by,
+      sort_order: filters.sort_order,
+    };
+    if (filters.status) cleaned.status = filters.status;
+    if (filters.file_type) cleaned.file_type = filters.file_type;
+    if (filters.category?.trim()) cleaned.category = filters.category.trim();
+    if (filters.search?.trim()) cleaned.search = filters.search.trim();
+    return cleaned;
+  }, [filters.limit, filters.offset, filters.sort_by, filters.sort_order, filters.status, filters.file_type, filters.category, filters.search]);
+
+  // Create stable query key
+  const queryKey = useMemo(() => {
+    return [
+      'documents',
+      filters.limit,
+      filters.offset,
+      filters.sort_by,
+      filters.sort_order,
+      filters.status || null,
+      filters.file_type || null,
+      filters.category?.trim() || null,
+      filters.search?.trim() || null,
+    ];
+  }, [filters.limit, filters.offset, filters.sort_by, filters.sort_order, filters.status, filters.file_type, filters.category, filters.search]);
+
+  // Fetch documents - NO automatic polling
+  const { data: documentList, refetch } = useQuery({
+    queryKey,
+    queryFn: () => documentService.listDocuments(cleanFilters),
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+  });
+
+  // Refetch when returning to home page (in case document was updated)
+  const prevPathRef = useRef<string>('');
+  useEffect(() => {
+    const currentPath = location.pathname;
+    // If we're on home page and came from a document detail page, force refetch
+    if (currentPath === '/' && prevPathRef.current.startsWith('/documents/') && prevPathRef.current !== currentPath) {
+      // Invalidate and refetch to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      refetch();
+    }
+    prevPathRef.current = currentPath;
+  }, [location.pathname, refetch, queryClient]);
+
+  // Manual polling only when there are processing documents
+  const hasProcessing = useMemo(() => {
+    return documentList?.documents?.some((doc) => doc.status === 'processing') ?? false;
+  }, [documentList?.documents]);
+  
+  useEffect(() => {
+    if (!hasProcessing) return;
+    
+    const interval = setInterval(() => {
+      // Only refetch if there are still processing documents
+      queryClient.refetchQueries({ queryKey, exact: true });
+    }, 5000); // Poll every 5 seconds instead of 3
+    
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasProcessing]); // Only depend on hasProcessing - queryKey and queryClient are stable
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => documentService.deleteDocument(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
     },
   });
+
+  const documents = documentList?.documents || [];
+  const total = documentList?.total || 0;
 
   // Update stats based on actual data
   const completedCount = documents.filter((d) => d.status === 'completed').length;
   const processingCount = documents.filter((d) => d.status === 'processing').length;
+
+  const handleDelete = (id: number, title: string) => {
+    if (confirm(`"${title}" belgesini silmek istediğinizden emin misiniz?`)) {
+      deleteMutation.mutate(id);
+    }
+  };
 
   return (
     <Layout
@@ -197,13 +283,71 @@ export default function Home() {
       <section className="mt-10 grid gap-6 lg:grid-cols-[2fr,1fr]">
         <div className="rounded-3xl border border-gray-200 bg-white/80 p-8 shadow-lg shadow-gray-200/40 dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40">
           <div className="mb-6 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Belgelerim</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              Belgelerim {total > 0 && <span className="text-sm text-gray-500">({total})</span>}
+            </h2>
             <Link
               to="/documents/upload"
               className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
             >
               Yeni Ekle →
             </Link>
+          </div>
+
+          {/* Filters */}
+          <div className="mb-4 flex flex-wrap gap-2">
+            <input
+              type="text"
+              placeholder="Ara..."
+              value={filters.search || ''}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value, offset: 0 })}
+              className="flex-1 min-w-[200px] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            />
+            <select
+              value={filters.status || ''}
+              onChange={(e) =>
+                setFilters({
+                  ...filters,
+                  status: (e.target.value || undefined) as Document['status'] | undefined,
+                  offset: 0,
+                })
+              }
+              className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            >
+              <option value="">Tüm Durumlar</option>
+              <option value="completed">Tamamlandı</option>
+              <option value="processing">İşleniyor</option>
+              <option value="failed">Başarısız</option>
+            </select>
+            <select
+              value={filters.file_type || ''}
+              onChange={(e) =>
+                setFilters({
+                  ...filters,
+                  file_type: (e.target.value || undefined) as Document['file_type'] | undefined,
+                  offset: 0,
+                })
+              }
+              className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            >
+              <option value="">Tüm Tipler</option>
+              <option value="pdf">PDF</option>
+              <option value="image">Görsel</option>
+              <option value="docx">DOCX</option>
+            </select>
+            <select
+              value={`${filters.sort_by}_${filters.sort_order}`}
+              onChange={(e) => {
+                const [sort_by, sort_order] = e.target.value.split('_');
+                setFilters({ ...filters, sort_by, sort_order: sort_order as 'asc' | 'desc' });
+              }}
+              className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            >
+              <option value="created_at_desc">En Yeni</option>
+              <option value="created_at_asc">En Eski</option>
+              <option value="title_asc">Başlık (A-Z)</option>
+              <option value="title_desc">Başlık (Z-A)</option>
+            </select>
           </div>
 
           {documents.length === 0 ? (
@@ -244,7 +388,10 @@ export default function Home() {
                     className="group rounded-2xl border border-gray-200 bg-white/60 p-4 transition hover:border-blue-500/40 hover:shadow-md dark:border-gray-800 dark:bg-gray-900/60 dark:hover:border-blue-500/40"
                   >
                     <div className="flex items-start justify-between">
-                      <div className="flex-1">
+                      <div
+                        className="flex-1 cursor-pointer"
+                        onClick={() => navigate(`/documents/${document.id}`)}
+                      >
                         <div className="flex items-center gap-3">
                           <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
                             {document.title}
@@ -272,6 +419,27 @@ export default function Home() {
                             </p>
                           </div>
                         )}
+                      </div>
+                      <div className="ml-4 flex gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/documents/${document.id}`);
+                          }}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                        >
+                          Görüntüle
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(document.id, document.title);
+                          }}
+                          disabled={deleteMutation.isPending}
+                          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-500 dark:hover:bg-red-600"
+                        >
+                          Sil
+                        </button>
                       </div>
                     </div>
                   </div>

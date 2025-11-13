@@ -2,13 +2,20 @@
 Document API endpoints
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from typing import Optional
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.document import DocumentUploadResponse, DocumentResponse
+from app.models.document import DocumentStatus, FileType
+from app.schemas.document import (
+    DocumentUploadResponse,
+    DocumentResponse,
+    DocumentUpdateRequest,
+    DocumentListResponse
+)
 from app.services.document_service import DocumentService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -98,33 +105,147 @@ async def get_document(
     return DocumentResponse.model_validate(document)
 
 
-@router.get("", response_model=list[DocumentResponse])
+@router.get("", response_model=DocumentListResponse)
 async def list_documents(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: Optional[DocumentStatus] = Query(None),
+    file_type: Optional[FileType] = Query(None),
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("created_at", regex="^(created_at|title|file_type|status)$"),
+    sort_order: str = Query("desc", regex="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    List documents for current user
+    List documents for current user with filtering, sorting, and pagination
 
     Args:
-        limit: Number of documents to return
+        limit: Number of documents to return (1-100)
         offset: Number of documents to skip
+        status: Filter by document status
+        file_type: Filter by file type
+        category: Filter by category
+        search: Search in title, filename, or extracted text
+        sort_by: Sort field (created_at, title, file_type, status)
+        sort_order: Sort order (asc, desc)
         db: Database session
         current_user: Authenticated user
 
     Returns:
-        List of documents
+        Document list with pagination info
     """
     document_service = DocumentService(db)
+    
     documents = await document_service.repository.list_by_user(
         user_id=current_user.id,
         limit=limit,
-        offset=offset
+        offset=offset,
+        status=status,
+        file_type=file_type,
+        category=category,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order
     )
     
-    return [DocumentResponse.model_validate(doc) for doc in documents]
+    total = await document_service.repository.count_by_user(
+        user_id=current_user.id,
+        status=status,
+        file_type=file_type,
+        category=category,
+        search=search
+    )
+    
+    return DocumentListResponse(
+        documents=[DocumentResponse.model_validate(doc) for doc in documents],
+        total=total,
+        limit=limit,
+        offset=offset
+    )
+
+
+@router.patch("/{document_id}", response_model=DocumentResponse)
+async def update_document(
+    document_id: int,
+    update_data: DocumentUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update document metadata (title, category)
+
+    Args:
+        document_id: Document ID to update
+        update_data: Update data (title, category)
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        Updated document response
+    """
+    document_service = DocumentService(db)
+    
+    try:
+        update_dict = update_data.model_dump(exclude_unset=True)
+        document = await document_service.update_document(
+            document_id=document_id,
+            user_id=current_user.id,
+            update_data=update_dict
+        )
+        
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        
+        return DocumentResponse.model_validate(document)
+        
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc)
+        ) from exc
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Delete a document
+
+    Args:
+        document_id: Document ID to delete
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        No content (204)
+    """
+    document_service = DocumentService(db)
+    
+    try:
+        deleted = await document_service.delete_document(
+            document_id=document_id,
+            user_id=current_user.id
+        )
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc)
+        ) from exc
 
 
 @router.post("/{document_id}/reprocess", response_model=DocumentResponse)

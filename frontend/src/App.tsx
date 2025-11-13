@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Home from './pages/Home'
 import DocumentUpload from './pages/DocumentUpload'
+import DocumentDetail from './pages/DocumentDetail'
 import ProtectedRoute from './components/ProtectedRoute'
 import { useAuthStore } from './store/authStore'
 import { useThemeStore } from './store/themeStore'
@@ -13,7 +14,10 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
       retry: 1,
+      staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
     },
   },
 })
@@ -45,6 +49,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <DocumentUpload />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/documents/:id"
+            element={
+              <ProtectedRoute>
+                <DocumentDetail />
               </ProtectedRoute>
             }
           />

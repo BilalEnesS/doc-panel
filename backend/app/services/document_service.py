@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.document import DocumentStatus, FileType
+from app.models.document import Document, DocumentStatus, FileType
 from app.models.user import User
 from app.repositories.document_repository import DocumentRepository
 from app.services.ocr_service import ocr_service
@@ -231,5 +231,69 @@ class DocumentService:
         await file.seek(0)
 
         return file_path, relative_path, unique_filename
+    
+    async def update_document(
+        self,
+        document_id: int,
+        user_id: int,
+        update_data: dict
+    ) -> Optional[Document]:
+        """
+        Update document metadata
+        
+        Args:
+            document_id: Document ID to update
+            user_id: User ID (for authorization)
+            update_data: Dictionary with fields to update (title, category)
+        
+        Returns:
+            Updated document or None if not found
+        """
+        document = await self.repository.get_by_id(document_id)
+        if not document:
+            return None
+        
+        # Check ownership
+        if document.user_id != user_id:
+            raise ValueError("Access denied: Document does not belong to user")
+        
+        # Only allow updating title and category
+        allowed_fields = {"title", "category"}
+        filtered_data = {k: v for k, v in update_data.items() if k in allowed_fields}
+        
+        if not filtered_data:
+            return document
+        
+        return await self.repository.update(document_id, filtered_data)
+    
+    async def delete_document(self, document_id: int, user_id: int) -> bool:
+        """
+        Delete document and its file
+        
+        Args:
+            document_id: Document ID to delete
+            user_id: User ID (for authorization)
+        
+        Returns:
+            True if deleted, False if not found
+        """
+        document = await self.repository.get_by_id(document_id)
+        if not document:
+            return False
+        
+        # Check ownership
+        if document.user_id != user_id:
+            raise ValueError("Access denied: Document does not belong to user")
+        
+        # Delete file from disk
+        file_path = Path(settings.UPLOAD_DIR) / document.file_path
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to delete file {file_path}: {str(e)}")
+        
+        # Delete from database
+        return await self.repository.delete(document_id)
 
 
