@@ -19,6 +19,7 @@ from app.models.document import Document, DocumentStatus, FileType
 from app.models.user import User
 from app.repositories.document_repository import DocumentRepository
 from app.services.ocr_service import ocr_service
+from app.services.embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -134,14 +135,29 @@ class DocumentService:
                     
                     logger.info(f"OCR extraction completed for document {document_id}, text length: {len(extracted_text)}")
                     
-                    # Update document with extracted text and completed status
-                    await repository.update(
-                        document_id,
-                        {
-                            "extracted_text": extracted_text,
-                            "status": DocumentStatus.COMPLETED
-                        }
-                    )
+                    # Generate embedding for semantic search
+                    embedding = None
+                    if embedding_service.is_available():
+                        logger.info(f"Generating embedding for document {document_id}")
+                        # Use title + extracted text for better semantic search
+                        text_for_embedding = f"{document.title}\n\n{extracted_text}"
+                        embedding = await embedding_service.generate_embedding(text_for_embedding)
+                        if embedding:
+                            logger.info(f"Embedding generated for document {document_id}")
+                        else:
+                            logger.warning(f"Failed to generate embedding for document {document_id}")
+                    else:
+                        logger.info("Embedding service not available, skipping embedding generation")
+                    
+                    # Update document with extracted text, embedding, and completed status
+                    update_data = {
+                        "extracted_text": extracted_text,
+                        "status": DocumentStatus.COMPLETED
+                    }
+                    if embedding:
+                        update_data["embedding"] = embedding
+                    
+                    await repository.update(document_id, update_data)
                     logger.info(f"Document {document_id} status updated to COMPLETED")
                     
                 except Exception as ocr_error:
@@ -295,5 +311,44 @@ class DocumentService:
         
         # Delete from database
         return await self.repository.delete(document_id)
+    
+    async def semantic_search(
+        self,
+        user_id: int,
+        query: str,
+        limit: int = 10,
+        threshold: float = 0.7
+    ) -> list[tuple[Document, float]]:
+        """
+        Perform semantic search on user's documents
+        
+        Args:
+            user_id: User ID
+            query: Search query text
+            limit: Maximum number of results
+            threshold: Minimum similarity threshold (0-1)
+        
+        Returns:
+            List of tuples (document, similarity_score)
+        """
+        # Generate embedding for query
+        if not embedding_service.is_available():
+            logger.warning("Embedding service not available, cannot perform semantic search")
+            return []
+        
+        query_embedding = await embedding_service.generate_embedding(query)
+        if not query_embedding:
+            logger.warning("Failed to generate embedding for search query")
+            return []
+        
+        # Perform semantic search
+        results = await self.repository.semantic_search(
+            user_id=user_id,
+            query_embedding=query_embedding,
+            limit=limit,
+            threshold=threshold
+        )
+        
+        return results
 
 

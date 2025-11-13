@@ -50,4 +50,21 @@ export interface DocumentListParams {
   sort_order?: 'asc' | 'desc';
 }
 
+export interface SemanticSearchRequest {
+  query: string;
+  limit?: number;
+  threshold?: number;
+}
+
+export interface SemanticSearchResult {
+  document: Document;
+  similarity: number;
+}
+
+export interface SemanticSearchResponse {
+  results: SemanticSearchResult[];
+  query: string;
+  total: number;
+}
+
 

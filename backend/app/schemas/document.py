@@ -51,3 +51,26 @@ class DocumentListResponse(BaseModel):
     offset: int
 
 
+class SemanticSearchRequest(BaseModel):
+    """Semantic search request schema"""
+
+    query: str
+    limit: Optional[int] = 10
+    threshold: Optional[float] = 0.7
+
+
+class SemanticSearchResult(BaseModel):
+    """Semantic search result with similarity score"""
+
+    document: DocumentResponse
+    similarity: float
+
+
+class SemanticSearchResponse(BaseModel):
+    """Semantic search response schema"""
+
+    results: list[SemanticSearchResult]
+    query: str
+    total: int
+
+

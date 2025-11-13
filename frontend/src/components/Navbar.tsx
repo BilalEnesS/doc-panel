@@ -11,6 +11,7 @@ import clsx from 'clsx';
 const navigationItems = [
   { label: 'Overview', to: '/' },
   { label: 'Upload', to: '/documents/upload' },
+  { label: 'Search', to: '/search' },
 ];
 
 export default function Navbar() {

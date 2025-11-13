@@ -14,7 +14,10 @@ from app.schemas.document import (
     DocumentUploadResponse,
     DocumentResponse,
     DocumentUpdateRequest,
-    DocumentListResponse
+    DocumentListResponse,
+    SemanticSearchRequest,
+    SemanticSearchResponse,
+    SemanticSearchResult
 )
 from app.services.document_service import DocumentService
 
@@ -287,5 +290,54 @@ async def reprocess_document(
     background_tasks.add_task(document_service.process_ocr, document.id)
     
     return DocumentResponse.model_validate(document)
+
+
+@router.post("/search", response_model=SemanticSearchResponse)
+async def semantic_search(
+    search_request: SemanticSearchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Perform semantic search on user's documents
+    
+    Args:
+        search_request: Search query and parameters
+        db: Database session
+        current_user: Authenticated user
+    
+    Returns:
+        Semantic search results with similarity scores
+    """
+    document_service = DocumentService(db)
+    
+    try:
+        results = await document_service.semantic_search(
+            user_id=current_user.id,
+            query=search_request.query,
+            limit=search_request.limit or 10,
+            threshold=search_request.threshold or 0.7
+        )
+        
+        # Convert results to response format
+        search_results = [
+            SemanticSearchResult(
+                document=DocumentResponse.model_validate(doc),
+                similarity=similarity
+            )
+            for doc, similarity in results
+        ]
+        
+        return SemanticSearchResponse(
+            results=search_results,
+            query=search_request.query,
+            total=len(search_results)
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}"
+        ) from e
 
 
