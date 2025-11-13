@@ -9,6 +9,8 @@ import {
   DocumentUpdateRequest,
   DocumentListResponse,
   DocumentListParams,
+  SemanticSearchRequest,
+  SemanticSearchResponse,
 } from '../types/document';
 
 class DocumentService {
@@ -63,6 +65,14 @@ class DocumentService {
    */
   async reprocessDocument(documentId: number): Promise<Document> {
     const response = await apiClient.post<Document>(`/documents/${documentId}/reprocess`);
+    return response.data;
+  }
+
+  /**
+   * Perform semantic search on documents
+   */
+  async semanticSearch(request: SemanticSearchRequest): Promise<SemanticSearchResponse> {
+    const response = await apiClient.post<SemanticSearchResponse>('/documents/search', request);
     return response.data;
   }
 }

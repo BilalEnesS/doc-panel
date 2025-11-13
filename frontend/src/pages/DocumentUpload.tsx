@@ -4,6 +4,7 @@
 
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/Layout';
 import { documentService } from '../services/documentService';
 import { Document } from '../types/document';
@@ -26,6 +27,7 @@ const initialState: UploadState = {
 
 export default function DocumentUpload() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -107,6 +109,9 @@ export default function DocumentUpload() {
         successMessage: response.message,
         document: response.document,
       });
+
+      // Invalidate documents cache to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
 
       resetForm();
     } catch (error: any) {

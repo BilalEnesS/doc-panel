@@ -6,6 +6,7 @@ import Signup from './pages/Signup'
 import Home from './pages/Home'
 import DocumentUpload from './pages/DocumentUpload'
 import DocumentDetail from './pages/DocumentDetail'
+import SemanticSearch from './pages/SemanticSearch'
 import ProtectedRoute from './components/ProtectedRoute'
 import { useAuthStore } from './store/authStore'
 import { useThemeStore } from './store/themeStore'
@@ -57,6 +58,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <DocumentDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/search"
+            element={
+              <ProtectedRoute>
+                <SemanticSearch />
               </ProtectedRoute>
             }
           />

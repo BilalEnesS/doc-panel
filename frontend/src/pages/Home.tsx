@@ -157,12 +157,16 @@ export default function Home() {
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
   });
 
-  // Refetch when returning to home page (in case document was updated)
+  // Refetch when returning to home page (in case document was updated or uploaded)
   const prevPathRef = useRef<string>('');
   useEffect(() => {
     const currentPath = location.pathname;
-    // If we're on home page and came from a document detail page, force refetch
-    if (currentPath === '/' && prevPathRef.current.startsWith('/documents/') && prevPathRef.current !== currentPath) {
+    // If we're on home page and came from document detail or upload page, force refetch
+    if (
+      currentPath === '/' && 
+      (prevPathRef.current.startsWith('/documents/') || prevPathRef.current === '/documents/upload') &&
+      prevPathRef.current !== currentPath
+    ) {
       // Invalidate and refetch to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       refetch();
