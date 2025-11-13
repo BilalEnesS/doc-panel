@@ -3,6 +3,8 @@ Document service for handling business logic
 """
 
 import os
+import logging
+import asyncio
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
@@ -12,9 +14,13 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.models.document import DocumentStatus, FileType
 from app.models.user import User
 from app.repositories.document_repository import DocumentRepository
+from app.services.ocr_service import ocr_service
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentService:
@@ -69,6 +75,101 @@ class DocumentService:
 
         document = await self.repository.create(document_data)
         return document
+
+    async def process_ocr(self, document_id: int) -> None:
+        """
+        Process OCR for a document asynchronously
+        
+        Args:
+            document_id: Document ID to process
+        """
+        logger.info(f"Starting OCR processing for document ID: {document_id}")
+        
+        # Create new session for background task
+        async with AsyncSessionLocal() as session:
+            try:
+                repository = DocumentRepository(session)
+                
+                # Get document
+                document = await repository.get_by_id(document_id)
+                if not document:
+                    logger.warning(f"Document {document_id} not found")
+                    return
+                
+                logger.info(f"Document found: {document.title}, type: {document.file_type}")
+                
+                # Update status to processing
+                await repository.update(document_id, {"status": DocumentStatus.PROCESSING})
+                logger.info(f"Document {document_id} status updated to PROCESSING")
+                
+                # Get full file path
+                file_path = Path(settings.UPLOAD_DIR) / document.file_path
+                logger.info(f"Looking for file at: {file_path}")
+                
+                if not file_path.exists():
+                    error_msg = f"File not found at path: {file_path}"
+                    logger.error(error_msg)
+                    await repository.update(
+                        document_id,
+                        {
+                            "status": DocumentStatus.FAILED,
+                            "extracted_text": error_msg
+                        }
+                    )
+                    return
+                
+                logger.info(f"File found, starting OCR extraction...")
+                
+                # Extract text using OCR (run in thread pool to avoid blocking)
+                try:
+                    extracted_text = await asyncio.to_thread(
+                        ocr_service.extract_text_sync,
+                        file_path=file_path,
+                        file_type=document.file_type
+                    )
+                    
+                    if not extracted_text or len(extracted_text.strip()) == 0:
+                        extracted_text = "No text could be extracted from the document."
+                        logger.warning(f"No text extracted from document {document_id}")
+                    
+                    logger.info(f"OCR extraction completed for document {document_id}, text length: {len(extracted_text)}")
+                    
+                    # Update document with extracted text and completed status
+                    await repository.update(
+                        document_id,
+                        {
+                            "extracted_text": extracted_text,
+                            "status": DocumentStatus.COMPLETED
+                        }
+                    )
+                    logger.info(f"Document {document_id} status updated to COMPLETED")
+                    
+                except Exception as ocr_error:
+                    error_msg = f"OCR processing failed: {str(ocr_error)}"
+                    logger.error(f"OCR error for document {document_id}: {error_msg}", exc_info=True)
+                    await repository.update(
+                        document_id,
+                        {
+                            "status": DocumentStatus.FAILED,
+                            "extracted_text": error_msg
+                        }
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Unexpected error processing OCR for document {document_id}: {str(e)}", exc_info=True)
+                # Try to update status even if there's an error
+                try:
+                    async with AsyncSessionLocal() as error_session:
+                        error_repo = DocumentRepository(error_session)
+                        await error_repo.update(
+                            document_id,
+                            {
+                                "status": DocumentStatus.FAILED,
+                                "extracted_text": f"Unexpected error: {str(e)}"
+                            }
+                        )
+                except Exception as update_error:
+                    logger.error(f"Failed to update document status after error: {str(update_error)}")
 
     def _validate_file_extension(self, file: UploadFile) -> None:
         """Validate file extension based on allowed types"""

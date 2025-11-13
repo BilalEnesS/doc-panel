@@ -9,7 +9,7 @@ from app.core.config import settings
 # Create async engine
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=False,  # Set to False to disable SQL query logging
     future=True
 )
 
