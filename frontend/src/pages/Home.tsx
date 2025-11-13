@@ -1,6 +1,10 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import Layout from '../components/Layout';
 import { useAuthStore } from '../store/authStore';
+import { documentService } from '../services/documentService';
+import { Document } from '../types/document';
 
 const stats = [
   { label: 'Aktif Belgeler', value: '24', change: '+12%', changeType: 'positive' },
@@ -71,8 +75,51 @@ const quickActions = [
   },
 ];
 
+function getStatusBadge(status: Document['status']) {
+  const badges = {
+    uploading: {
+      label: 'Yükleniyor',
+      className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-300',
+    },
+    processing: {
+      label: 'OCR İşleniyor',
+      className: 'bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-300',
+    },
+    completed: {
+      label: 'Tamamlandı',
+      className: 'bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300',
+    },
+    failed: {
+      label: 'Başarısız',
+      className: 'bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-300',
+    },
+  };
+  return badges[status];
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 export default function Home() {
   const user = useAuthStore((state) => state.user);
+
+  // Fetch documents with polling for processing status
+  const { data: documents = [], refetch } = useQuery({
+    queryKey: ['documents'],
+    queryFn: () => documentService.listDocuments(20, 0),
+    refetchInterval: (query) => {
+      // Poll every 3 seconds if there are processing documents
+      const hasProcessing = query.state.data?.some((doc) => doc.status === 'processing');
+      return hasProcessing ? 3000 : false;
+    },
+  });
+
+  // Update stats based on actual data
+  const completedCount = documents.filter((d) => d.status === 'completed').length;
+  const processingCount = documents.filter((d) => d.status === 'processing').length;
 
   return (
     <Layout
@@ -98,88 +145,140 @@ export default function Home() {
       }
     >
       <section className="grid gap-6 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white/80 p-6 shadow-lg shadow-gray-200/40 transition hover:-translate-y-1 hover:shadow-xl dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{stat.label}</p>
-              <span
-                className={
-                  stat.changeType === 'positive'
-                    ? 'rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-600 dark:bg-green-500/10 dark:text-green-300'
-                    : 'rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                }
-              >
-                {stat.change}
-              </span>
-            </div>
-            <p className="mt-4 text-3xl font-semibold text-gray-900 dark:text-white">
-              {stat.value}
-            </p>
-            <div className="absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-blue-500/40 via-transparent to-transparent transition group-hover:from-blue-500/70" />
+        <div
+          className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white/80 p-6 shadow-lg shadow-gray-200/40 transition hover:-translate-y-1 hover:shadow-xl dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40"
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Aktif Belgeler</p>
           </div>
-        ))}
+          <p className="mt-4 text-3xl font-semibold text-gray-900 dark:text-white">
+            {documents.length}
+          </p>
+          <div className="absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-blue-500/40 via-transparent to-transparent transition group-hover:from-blue-500/70" />
+        </div>
+        <div
+          className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white/80 p-6 shadow-lg shadow-gray-200/40 transition hover:-translate-y-1 hover:shadow-xl dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40"
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              Bekleyen OCR İşlemi
+            </p>
+          </div>
+          <p className="mt-4 text-3xl font-semibold text-gray-900 dark:text-white">
+            {processingCount}
+          </p>
+          <div className="absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-blue-500/40 via-transparent to-transparent transition group-hover:from-blue-500/70" />
+        </div>
+        <div
+          className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white/80 p-6 shadow-lg shadow-gray-200/40 transition hover:-translate-y-1 hover:shadow-xl dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40"
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Tamamlanan</p>
+          </div>
+          <p className="mt-4 text-3xl font-semibold text-gray-900 dark:text-white">
+            {completedCount}
+          </p>
+          <div className="absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-green-500/40 via-transparent to-transparent transition group-hover:from-green-500/70" />
+        </div>
+        <div
+          className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white/80 p-6 shadow-lg shadow-gray-200/40 transition hover:-translate-y-1 hover:shadow-xl dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40"
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">AI Özetleri</p>
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-600 dark:bg-green-500/10 dark:text-green-300">
+              +30%
+            </span>
+          </div>
+          <p className="mt-4 text-3xl font-semibold text-gray-900 dark:text-white">18</p>
+          <div className="absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-purple-500/40 via-transparent to-transparent transition group-hover:from-purple-500/70" />
+        </div>
       </section>
 
       <section className="mt-10 grid gap-6 lg:grid-cols-[2fr,1fr]">
         <div className="rounded-3xl border border-gray-200 bg-white/80 p-8 shadow-lg shadow-gray-200/40 dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Akıllı belge yönetimine hoş geldiniz 🎯
-              </h2>
-              <p className="mt-2 max-w-xl text-sm text-gray-500 dark:text-gray-400">
-                Belgelerinizi yükleyin, OCR ile metne dönüştürün, AI ile kategorize edin ve özetleyin.
-                Semantic search ve chatbot ile belgelerinizden hızlıca bilgi edinin.
-              </p>
-            </div>
-            <div className="rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 p-[1px] shadow-lg shadow-blue-500/30">
-              <div className="flex items-center gap-3 rounded-2xl bg-white/90 px-5 py-3 text-sm font-medium text-blue-600 backdrop-blur dark:bg-gray-900/80 dark:text-blue-300">
-                <span className="rounded-full bg-blue-100/60 p-2 text-blue-600 dark:bg-blue-500/10">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth="1.5"
-                    stroke="currentColor"
-                    className="h-5 w-5"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3.75 5.25h16.5m-16.5 6h16.5m-16.5 6h16.5"
-                    />
-                  </svg>
-                </span>
-                Belgelerinizi güvenle yönetin
-              </div>
-            </div>
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Belgelerim</h2>
+            <Link
+              to="/documents/upload"
+              className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            >
+              Yeni Ekle →
+            </Link>
           </div>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            {quickActions.map((action) => (
-              <Link
-                key={action.title}
-                to={action.to}
-                className="group rounded-2xl border border-gray-200 bg-white/70 p-6 transition hover:-translate-y-1 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/20 dark:border-gray-800 dark:bg-gray-900/70 dark:hover:border-blue-500/60"
+          {documents.length === 0 ? (
+            <div className="rounded-2xl border-2 border-dashed border-gray-300 p-12 text-center dark:border-gray-700">
+              <svg
+                className="mx-auto h-12 w-12 text-gray-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
               >
-                <div className="flex items-center justify-between">
-                  <div className="rounded-full bg-blue-500/10 p-2 text-blue-600 transition group-hover:bg-blue-500 group-hover:text-white dark:bg-blue-500/10 dark:text-blue-300 dark:group-hover:bg-blue-500/70 dark:group-hover:text-white">
-                    {action.icon}
-                  </div>
-                  <span className="text-sm font-semibold text-blue-600 transition group-hover:translate-x-1 dark:text-blue-400">
-                    Başlat →
-                  </span>
-                </div>
-                <h3 className="mt-4 text-base font-semibold text-gray-900 dark:text-white">
-                  {action.title}
-                </h3>
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{action.description}</p>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              <h3 className="mt-4 text-sm font-semibold text-gray-900 dark:text-white">
+                Henüz belge yok
+              </h3>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                İlk belgenizi yükleyerek başlayın
+              </p>
+              <Link
+                to="/documents/upload"
+                className="mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+              >
+                Belge Yükle
               </Link>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {documents.map((document) => {
+                const badge = getStatusBadge(document.status);
+                return (
+                  <div
+                    key={document.id}
+                    className="group rounded-2xl border border-gray-200 bg-white/60 p-4 transition hover:border-blue-500/40 hover:shadow-md dark:border-gray-800 dark:bg-gray-900/60 dark:hover:border-blue-500/40"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {document.title}
+                          </h3>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
+                          >
+                            {badge.label}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                          <span>{document.filename}</span>
+                          <span>•</span>
+                          <span>{formatFileSize(document.file_size)}</span>
+                          <span>•</span>
+                          <span>{new Date(document.created_at).toLocaleDateString('tr-TR')}</span>
+                        </div>
+                        {document.status === 'processing' && (
+                          <div className="mt-3">
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
+                              <div className="h-full animate-pulse bg-gradient-to-r from-blue-500 to-indigo-500" />
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              OCR işlemi devam ediyor...
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -189,7 +288,7 @@ export default function Home() {
             </h3>
             <div className="mt-4 space-y-3">
               {[
-                { label: 'OCR İşleme', progress: 65 },
+                { label: 'OCR İşleme', progress: processingCount > 0 ? 65 : 100 },
                 { label: 'Semantic Indexing', progress: 40 },
                 { label: 'Özetleme', progress: 78 },
               ].map((item) => (
@@ -211,35 +310,33 @@ export default function Home() {
 
           <div className="rounded-3xl border border-gray-200 bg-white/80 p-6 shadow-lg shadow-gray-200/40 dark:border-gray-800 dark:bg-gray-900/80 dark:shadow-gray-900/40">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-              Son AI Aktiviteleri
+              Son Aktiviteler
             </h3>
             <ul className="mt-4 space-y-3">
-              {[
-                {
-                  title: 'Finans Raporu 2024',
-                  status: 'Özet hazırlandı',
-                  time: '3 dakika önce',
-                },
-                {
-                  title: 'Sözleşme V2',
-                  status: 'OCR tamamlandı',
-                  time: '12 dakika önce',
-                },
-                {
-                  title: 'Satış Analizi',
-                  status: 'Semantic index güncellendi',
-                  time: '18 dakika önce',
-                },
-              ].map((item) => (
-                <li
-                  key={item.title}
-                  className="rounded-2xl border border-gray-100 bg-white/60 p-4 transition hover:border-blue-500/40 dark:border-gray-800 dark:bg-gray-900/60 dark:hover:border-blue-500/40"
-                >
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.title}</p>
-                  <p className="mt-1 text-xs font-medium text-blue-600 dark:text-blue-400">{item.status}</p>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{item.time}</p>
+              {documents.slice(0, 3).map((doc) => {
+                const badge = getStatusBadge(doc.status);
+                return (
+                  <li
+                    key={doc.id}
+                    className="rounded-2xl border border-gray-100 bg-white/60 p-4 transition hover:border-blue-500/40 dark:border-gray-800 dark:bg-gray-900/60 dark:hover:border-blue-500/40"
+                  >
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {doc.title}
+                    </p>
+                    <p className={`mt-1 text-xs font-medium ${badge.className.split(' ')[1]}`}>
+                      {badge.label}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {new Date(doc.created_at).toLocaleDateString('tr-TR')}
+                    </p>
+                  </li>
+                );
+              })}
+              {documents.length === 0 && (
+                <li className="rounded-2xl border border-gray-100 bg-white/60 p-4 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400">
+                  Henüz aktivite yok
                 </li>
-              ))}
+              )}
             </ul>
           </div>
         </div>
@@ -247,5 +344,3 @@ export default function Home() {
     </Layout>
   );
 }
-
-

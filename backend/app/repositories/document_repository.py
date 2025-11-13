@@ -40,4 +40,17 @@ class DocumentRepository:
         )
         return result.scalars().all()
 
+    async def update(self, document_id: int, update_data: dict) -> Optional[Document]:
+        """Update document by ID"""
+        document = await self.get_by_id(document_id)
+        if not document:
+            return None
+        
+        for key, value in update_data.items():
+            setattr(document, key, value)
+        
+        await self.session.commit()
+        await self.session.refresh(document)
+        return document
+
 
